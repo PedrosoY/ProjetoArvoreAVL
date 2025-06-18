@@ -6,479 +6,522 @@ using System.Windows.Forms;
 
 namespace ProjetoArvoreAVL
 {
-    public partial class FormPrincipal : Form
+    public partial class FormularioPrincipal : Form
     {
-        private AVLTree<int> avl = new AVLTree<int>();
+        private ArvoreAVL<int> arvore = new ArvoreAVL<int>();
+        private List<NoAVL<int>?> historicoEstados = new List<NoAVL<int>?>();
+        private int indiceAtual = -1;
+        private float zoom = 1.0f;
+        private Point panOffset = Point.Empty;
+        private Point lastMousePos;
+        private bool isPanning = false;
 
-        public FormPrincipal()
+        public FormularioPrincipal()
         {
             InitializeComponent();
+            ConfigurarEstiloDataGridView();
         }
 
-        private void AtualizarVisualizacao()
+        private void ConfigurarEstiloDataGridView()
         {
-            panelDesenho.Invalidate();
-        }
-        private void btnInserir_Click(object sender, EventArgs e)
-            => ProcessarComando($"I {txtValor.Text}");
-
-        private void btnRemover_Click(object sender, EventArgs e)
-            => ProcessarComando($"R {txtValor.Text}");
-
-        private void btnBuscar_Click(object sender, EventArgs e)
-            => ProcessarComando($"B {txtValor.Text}");
-
-        private void btnPreOrdem_Click(object sender, EventArgs e)
-            => ProcessarComando("P");
-
-        private void btnFatores_Click(object sender, EventArgs e)
-            => ProcessarComando("F");
-
-        private void btnAltura_Click(object sender, EventArgs e)
-            => ProcessarComando("H");
-
-        private void Log(string comando, string resultado)
-        {
-            dataGridViewLog.Rows.Add(comando, resultado);
-
-            // Rolar automaticamente para a última linha
-            if (dataGridViewLog.RowCount > 0)
-                dataGridViewLog.FirstDisplayedScrollingRowIndex = dataGridViewLog.RowCount - 1;
+            dataGridViewLog.ColumnHeadersDefaultCellStyle.ForeColor = Color.White;
+            dataGridViewLog.DefaultCellStyle.ForeColor = Color.Black;
         }
 
-        private void ProcessarComando(string linha)
-        {
-            if (string.IsNullOrWhiteSpace(linha)) return;
-            var parts = linha.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var cmd = parts[0].ToUpper();
-            int val;
 
-            switch (cmd)
+        private void btnAdicionar_Click(object? sender, EventArgs? e)
+        {
+            if (int.TryParse(txtValorNo.Text, out int valor))
+                ExecutarOperacao("I " + valor);
+            else
+                MessageBox.Show("Valor inválido.", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private void btnRemover_Click(object? sender, EventArgs? e)
+        {
+            if (int.TryParse(txtValorNo.Text, out int valor))
+                ExecutarOperacao("R " + valor);
+            else
+                MessageBox.Show("Valor inválido.", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private void btnBuscar_Click(object? sender, EventArgs? e)
+        {
+            if (int.TryParse(txtValorNo.Text, out int valor))
+                ExecutarOperacao("B " + valor);
+            else
+                MessageBox.Show("Valor inválido.", "Erro", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+
+        private void btnPreOrdem_Click(object? sender, EventArgs? e) => ExecutarOperacao("P");
+        private void btnBalanceamento_Click(object? sender, EventArgs? e) => ExecutarOperacao("F");
+        private void btnAltura_Click(object? sender, EventArgs? e) => ExecutarOperacao("H");
+
+        private void ExecutarOperacao(string comando, bool silencioso = false)
+        {
+            if (string.IsNullOrWhiteSpace(comando))
+                return;
+
+            var partes = comando.Split(' ');
+            var acao = partes[0];
+            int valor = 0;
+            if (acao is "I" or "R" or "B")
+            {
+                if (partes.Length < 2 || !int.TryParse(partes[1], out valor))
+                {
+                    MostrarLog(acao, "Parâmetro inválido: " + comando);
+                    return;
+                }
+            }
+
+            switch (acao)
             {
                 case "I":
-                    if (parts.Length > 1 && int.TryParse(parts[1], out val))
+                    if (arvore.Buscar(valor))
                     {
-                        avl.Insert(val);
-                        Log("I", $"Inserido {val}");
+                        if (!silencioso)
+                            MessageBox.Show($"O valor {valor} já existe.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                     else
-                        Log("I", $"Parâmetro inválido em: {linha}");
+                    {
+                        arvore.Inserir(valor);
+                        MostrarLog("I", $"Inserido {valor}");
+                        RegistrarEstado();
+                        if (!silencioso)
+                            AtualizarTextBoxComandos(comando);
+                    }
                     break;
 
                 case "R":
-                    if (parts.Length > 1 && int.TryParse(parts[1], out val))
+                    if (!arvore.Buscar(valor))
                     {
-                        avl.Remove(val);
-                        Log("R", $"Removido {val}");
+                        if (!silencioso)
+                            MessageBox.Show($"O valor {valor} não foi encontrado.", "Aviso", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     }
                     else
-                        Log("R", $"Parâmetro inválido em: {linha}");
+                    {
+                        arvore.Remover(valor);
+                        MostrarLog("R", $"Removido {valor}");
+                        RegistrarEstado();
+                        if (!silencioso)
+                            AtualizarTextBoxComandos(comando);
+                    }
                     break;
 
                 case "B":
-                    if (parts.Length > 1 && int.TryParse(parts[1], out val))
-                    {
-                        bool found = avl.Search(val);
-                        Log("B", found ? "Valor encontrado" : "Valor não encontrado");
-                    }
-                    else
-                        Log("B", $"Parâmetro inválido em: {linha}");
+                    bool encontrado = arvore.Buscar(valor);
+                    MostrarLog("B", encontrado ? "Encontrado" : "Não encontrado");
+                    if (!silencioso)
+                        AtualizarTextBoxComandos(comando);
                     break;
 
-
                 case "P":
-                    var ordem = avl.PreOrder();
-                    if (ordem.Count > 0)
-                        Log("P", $"Árvore em pré-ordem: {string.Join(" ", ordem)}");
-                    else
-                        Log("P", "Árvore vazia");
+                    var lista = arvore.PreOrdem();
+                    MostrarLog("P", lista.Count > 0 ? string.Join(", ", lista) : "Árvore vazia");
+                    if (!silencioso)
+                        AtualizarTextBoxComandos(comando);
                     break;
 
                 case "F":
-                    {
-                        var fatores = avl.BalanceFactors();
-                        if (fatores.Count > 0)
-                        {
-                            Log("F", "Fatores de balanceamento:");
-                            foreach (var kv in fatores)
-                                Log("F", $"Nó {kv.Key}: Fator de balanceamento {kv.Value}");
-                        }
-                        else
-                        {
-                            Log("F", "Árvore vazia ou sem fatores para exibir");
-                        }
-                        break;
-                    }
+                    var fatores = arvore.ObterFatoresBalanceamento();
+                    if (fatores.Count == 0)
+                        MostrarLog("F", "Árvore vazia");
+                    else
+                        foreach (var kv in fatores)
+                            MostrarLog("F", $"Nó {kv.Key}: {kv.Value}");
+                    if (!silencioso)
+                        AtualizarTextBoxComandos(comando);
+                    break;
 
                 case "H":
-                    Log("H", $"Altura da árvore: {avl.Height()}");
+                    MostrarLog("H", $"Altura: {arvore.Altura()}");
+                    if (!silencioso)
+                        AtualizarTextBoxComandos(comando);
                     break;
-
 
                 default:
-                    Log("?", $"Comando inválido: {linha}");
+                    MostrarLog("?", "Comando inválido: " + comando);
                     break;
             }
-
-            txtBoxLinhasCodigoAtual.TextChanged -= txtBoxLinhasCodigoAtual_TextChanged;
-            txtBoxLinhasCodigoAtual.AppendText(linha + Environment.NewLine);
-            txtBoxLinhasCodigoAtual.TextChanged += txtBoxLinhasCodigoAtual_TextChanged;
-
-            AtualizarVisualizacao();
         }
 
-        private void btnLerArquivoTxT_Click(object sender, EventArgs e)
+        private void RegistrarEstado()
         {
-            using (OpenFileDialog ofd = new OpenFileDialog())
+            historicoEstados.Add(arvore.CloneRaiz());
+            indiceAtual = historicoEstados.Count - 1;
+            AtualizarIndicador();
+            panelHistorico.Invalidate();
+        }
+
+        private void MostrarLog(string acao, string resultado)
+        {
+            dataGridViewLog.Rows.Add(acao, resultado);
+            dataGridViewLog.FirstDisplayedScrollingRowIndex = dataGridViewLog.RowCount - 1;
+        }
+
+        private void AtualizarIndicador() => lblIndicador.Text = $"{indiceAtual + 1}/{historicoEstados.Count}";
+
+        private void AtualizarTextBoxComandos(string comando)
+        {
+            txtHistoricoComandos.TextChanged -= txtHistoricoComandos_TextChanged;
+            txtHistoricoComandos.AppendText(comando + Environment.NewLine);
+            txtHistoricoComandos.TextChanged += txtHistoricoComandos_TextChanged;
+        }
+
+        private void btnCarregarArquivo_Click(object? sender, EventArgs? e)
+        {
+            using var ofd = new OpenFileDialog { Filter = "*.txt|*.txt" };
+            if (ofd.ShowDialog() != DialogResult.OK) return;
+
+            var linhas = File.ReadAllLines(ofd.FileName);
+            if (MessageBox.Show("Limpar antes?", "Confirmar", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
             {
-                ofd.Filter = "Text files (*.txt)|*.txt";
-                if (ofd.ShowDialog() == DialogResult.OK)
-                {
-                    var linhas = File.ReadAllLines(ofd.FileName);
+                dataGridViewLog.Rows.Clear();
+                txtHistoricoComandos.Clear();
+                arvore = new ArvoreAVL<int>();
+                historicoEstados.Clear();
+                indiceAtual = -1;
+                AtualizarIndicador();
+                panelHistorico.Invalidate();
+            }
 
-                    // Perguntar ao usuário se ele quer resetar a árvore
-                    var resposta = MessageBox.Show(
-                        "Deseja limpar a árvore e o log antes de carregar o arquivo?",
-                        "Confirmar Reset",
-                        MessageBoxButtons.YesNo,
-                        MessageBoxIcon.Question
-                    );
+            foreach (var linha in linhas)
+                ExecutarOperacao(linha);
+        }
 
-                    if (resposta == DialogResult.Yes)
-                    {
-                        dataGridViewLog.Rows.Clear();
-                        avl = new AVLTree<int>();
-                        txtBoxLinhasCodigoAtual.Clear();
-                    }
+        private void panelHistorico_Paint(object? sender, PaintEventArgs? e)
+        {
+            if (indiceAtual < 0 || indiceAtual >= historicoEstados.Count || historicoEstados[indiceAtual] is null)
+                return;
 
-                    foreach (var linha in linhas)
-                        ProcessarComando(linha);
-                }
+            var g = e!.Graphics;
+
+            g.TranslateTransform(panOffset.X, panOffset.Y);
+            g.ScaleTransform(zoom, zoom);
+
+            DesenharNo(g, historicoEstados[indiceAtual]!, panelHistorico.ClientRectangle, 0);
+        }
+        private void PanelHistorico_MouseWheel(object? sender, MouseEventArgs e)
+        {
+            float oldZoom = zoom;
+            if (e.Delta > 0)
+                zoom *= 1.1f;
+            else
+                zoom /= 1.1f;
+
+            // Ajustar o pan para manter o ponto do mouse estável
+            var mousePos = e.Location;
+            panOffset.X = (int)(mousePos.X - (mousePos.X - panOffset.X) * (zoom / oldZoom));
+            panOffset.Y = (int)(mousePos.Y - (mousePos.Y - panOffset.Y) * (zoom / oldZoom));
+
+            panelHistorico.Invalidate();
+        }
+
+        private void PanelHistorico_MouseDown(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                isPanning = true;
+                lastMousePos = e.Location;
+                panelHistorico.Cursor = Cursors.Hand;
+            }
+        }
+
+        private void PanelHistorico_MouseMove(object? sender, MouseEventArgs e)
+        {
+            if (isPanning)
+            {
+                panOffset.X += e.X - lastMousePos.X;
+                panOffset.Y += e.Y - lastMousePos.Y;
+                lastMousePos = e.Location;
+                panelHistorico.Invalidate();
+            }
+        }
+
+        private void PanelHistorico_MouseUp(object? sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                isPanning = false;
+                panelHistorico.Cursor = Cursors.Default;
             }
         }
 
 
-        private void panelDesenho_Paint(object sender, PaintEventArgs e)
+        private void btnPrevStep_Click(object? sender, EventArgs? e)
         {
-            if (avl.Root != null)
-            {
-                var area = panelDesenho.ClientRectangle;
-                DesenharNo(e.Graphics, avl.Root, area, 0);
-            }
+            if (indiceAtual > 0) indiceAtual--;
+            AtualizarIndicador();
+            panelHistorico.Invalidate();
         }
 
-        private void DesenharNo(Graphics g, AVLNode<int> node, Rectangle area, int depth)
+        private void btnNextStep_Click(object? sender, EventArgs? e)
         {
-            int nivelMax = Math.Max(1, avl.Height());
-            // calcula posição Y do nó
-            int y = (depth + 1) * area.Height / (nivelMax + 1);
+            if (indiceAtual < historicoEstados.Count - 1) indiceAtual++;
+            AtualizarIndicador();
+            panelHistorico.Invalidate();
+        }
 
-            // subdivide horizontalmente a área proporcional ao tamanho da subárvore
-            int total = CountNodes(node);
-            int leftCount = CountNodes(node.Left);
-            int x = area.X + (area.Width * (leftCount + 1)) / (total + 1);
+        private void DesenharNo(Graphics g, NoAVL<int> no, Rectangle area, int profundidade)
+        {
+            int alturaMax = Math.Max(1, arvore.Altura());
+            int y = (profundidade + 1) * area.Height / (alturaMax + 1);
+            int total = ContarNos(no);
+            int esquerda = ContarNos(no.Esquerda);
+            int x = area.X + (area.Width * (esquerda + 1)) / (total + 1);
 
-            // desenha linha para filho esquerdo
-            if (node.Left != null)
+            if (no.Esquerda is not null)
             {
-                var leftArea = new Rectangle(area.X, area.Y, area.Width * leftCount / total, area.Height);
-                int x2 = leftArea.X + leftArea.Width * (CountNodes(node.Left.Left) + 1) / (CountNodes(node.Left) + 1);
-                int y2 = (depth + 2) * area.Height / (nivelMax + 1);
+                var areaEsquerda = new Rectangle(area.X, area.Y, area.Width * esquerda / total, area.Height);
+                int x2 = areaEsquerda.X + areaEsquerda.Width * (ContarNos(no.Esquerda.Esquerda) + 1) / (ContarNos(no.Esquerda) + 1);
+                int y2 = (profundidade + 2) * area.Height / (alturaMax + 1);
                 g.DrawLine(Pens.White, x, y, x2, y2);
-                DesenharNo(g, node.Left, leftArea, depth + 1);
+                DesenharNo(g, no.Esquerda, areaEsquerda, profundidade + 1);
             }
 
-            // desenha linha para filho direito
-            if (node.Right != null)
+            if (no.Direita is not null)
             {
-                var rightArea = new Rectangle(
-                    area.X + area.Width * (leftCount + 1) / (total + 1),
+                var areaDireita = new Rectangle(
+                    area.X + area.Width * (esquerda + 1) / (total + 1),
                     area.Y,
-                    area.Width * (CountNodes(node.Right)) / (total + 1),
+                    area.Width * ContarNos(no.Direita) / (total + 1),
                     area.Height);
-                int x2 = rightArea.X + rightArea.Width * (CountNodes(node.Right.Left) + 1) / (CountNodes(node.Right) + 1);
-                int y2 = (depth + 2) * area.Height / (nivelMax + 1);
+                int x2 = areaDireita.X + areaDireita.Width * (ContarNos(no.Direita.Esquerda) + 1) / (ContarNos(no.Direita) + 1);
+                int y2 = (profundidade + 2) * area.Height / (alturaMax + 1);
                 g.DrawLine(Pens.White, x, y, x2, y2);
-                DesenharNo(g, node.Right, rightArea, depth + 1);
+                DesenharNo(g, no.Direita, areaDireita, profundidade + 1);
             }
 
-            // desenha o próprio nó
-            var raio = 20;
+            const int raio = 20;
             var rect = new Rectangle(x - raio, y - raio, raio * 2, raio * 2);
             g.FillEllipse(Brushes.DarkGray, rect);
             g.DrawEllipse(Pens.White, rect);
-            var txt = node.Value.ToString();
-            var sz = g.MeasureString(txt, this.Font);
-            g.DrawString(txt, this.Font, Brushes.White, x - sz.Width / 2, y - sz.Height / 2);
+            var txt = no.Valor.ToString();
+            var tam = g.MeasureString(txt, Font);
+            g.DrawString(txt, Font, Brushes.White, x - tam.Width / 2, y - tam.Height / 2);
         }
 
-        private int CountNodes(AVLNode<int> node)
-        {
-            if (node == null) return 0;
-            return 1 + CountNodes(node.Left) + CountNodes(node.Right);
-        }
+        private int ContarNos(NoAVL<int>? no)
+            => no is null ? 0 : 1 + ContarNos(no.Esquerda) + ContarNos(no.Direita);
 
-        private void txtBoxLinhasCodigoAtual_TextChanged(object sender, EventArgs e)
+        private void txtHistoricoComandos_TextChanged(object? sender, EventArgs? e)
         {
-            // Evita loop infinito ao editar o próprio txtBox programaticamente
-            txtBoxLinhasCodigoAtual.TextChanged -= txtBoxLinhasCodigoAtual_TextChanged;
+            txtHistoricoComandos.TextChanged -= txtHistoricoComandos_TextChanged;
 
-            // Resetar árvore e log
-            avl = new AVLTree<int>();
+            arvore = new ArvoreAVL<int>();
             dataGridViewLog.Rows.Clear();
+            historicoEstados.Clear();
+            indiceAtual = -1;
+            AtualizarIndicador();
+            panelHistorico.Invalidate();
 
-            // Processar cada linha
-            var linhas = txtBoxLinhasCodigoAtual.Text.Split(
-                new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-
+            var linhas = txtHistoricoComandos.Text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var linha in linhas)
-                ProcessarComandoSemReescreverCaixaTexto(linha);
+            {
+                ExecutarOperacao(linha, silencioso: true);
+            }
 
-            AtualizarVisualizacao();
-
-            // Reassocia o evento
-            txtBoxLinhasCodigoAtual.TextChanged += txtBoxLinhasCodigoAtual_TextChanged;
+            txtHistoricoComandos.TextChanged += txtHistoricoComandos_TextChanged;
         }
 
-
-
-        private void ProcessarComandoSemReescreverCaixaTexto(string linha)
+        private void panelHistorico_MouseEnter(object sender, EventArgs e)
         {
-            if (string.IsNullOrWhiteSpace(linha)) return;
+            panelHistorico.Focus();
+        }
 
-            var parts = linha.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            var cmd = parts[0].ToUpper();
-            int val;
+        private void btnCenter_Click(object sender, EventArgs e)
+        {
+            if (indiceAtual < 0 || indiceAtual >= historicoEstados.Count || historicoEstados[indiceAtual] is null)
+                return;
 
-            switch (cmd)
+            zoom = 1.0f;
+
+            var no = historicoEstados[indiceAtual]!;
+            int total = ContarNos(no);
+            int esquerda = ContarNos(no.Esquerda);
+            int areaWidth = panelHistorico.Width;
+            int xRaiz = (areaWidth * (esquerda + 1)) / (total + 1);
+
+            int centroPainel = panelHistorico.Width / 2;
+            panOffset = new Point(centroPainel - xRaiz, 20);
+
+            panelHistorico.Invalidate();
+        }
+
+        private int MedirLarguraVisual(NoAVL<int>? no)
+        {
+            if (no == null)
+                return 0;
+            if (no.Esquerda == null && no.Direita == null)
+                return 1;
+
+            return MedirLarguraVisual(no.Esquerda) + MedirLarguraVisual(no.Direita);
+        }
+
+        public class NoAVL<T> where T : IComparable<T>
+        {
+            public T Valor { get; set; }
+            public NoAVL<T>? Esquerda { get; set; }
+            public NoAVL<T>? Direita { get; set; }
+            public int Altura { get; set; }
+
+            public NoAVL(T valor)
             {
-                case "I":
-                    if (parts.Length > 1 && int.TryParse(parts[1], out val))
-                    {
-                        avl.Insert(val);
-                        Log("I", $"Inserido {val}");
-                    }
-                    else
-                        Log("I", $"Parâmetro inválido em: {linha}");
-                    break;
-
-                case "R":
-                    if (parts.Length > 1 && int.TryParse(parts[1], out val))
-                    {
-                        avl.Remove(val);
-                        Log("R", $"Removido {val}");
-                    }
-                    else
-                        Log("R", $"Parâmetro inválido em: {linha}");
-                    break;
-
-
-                case "B":
-                    if (parts.Length > 1 && int.TryParse(parts[1], out val))
-                    {
-                        bool found = avl.Search(val);
-                        Log("B", found ? "Valor encontrado" : "Valor não encontrado");
-                    }
-                    else
-                        Log("B", $"Parâmetro inválido em: {linha}");
-                    break;
-
-
-                case "P":
-                    var ordem = avl.PreOrder();
-                    if (ordem.Count > 0)
-                        Log("P", $"Árvore em pré-ordem: {string.Join(" ", ordem)}");
-                    else
-                        Log("P", "Árvore vazia");
-                    break;
-
-
-                case "F":
-                    var fatores = avl.BalanceFactors();
-                    if (fatores.Count > 0)
-                        Log("F", "Fatores de balanceamento:");
-                    foreach (var kv in fatores)
-                        Log("F", $"Nó {kv.Key}: Fator de balanceamento {kv.Value}");
-                    break;
-
-
-                case "H":
-                    Log("H", $"Altura da árvore: {avl.Height()}");
-                    break;
-
-                default:
-                    Log("?", $"Comando inválido: {linha}");
-                    break;
+                Valor = valor;
+                Altura = 1;
             }
         }
 
-
-        // --- Classe de nó AVL ---
-        public class AVLNode<T> where T : IComparable<T>
+        public class ArvoreAVL<T> where T : IComparable<T>
         {
-            public T Value;
-            public AVLNode<T> Left;
-            public AVLNode<T> Right;
-            public int Height;
+            public NoAVL<T>? Root { get; private set; }
 
-            public AVLNode(T value)
+            public void Inserir(T valor) => Root = Inserir(Root, valor);
+            public void Remover(T valor) => Root = Remover(Root, valor);
+            public bool Buscar(T valor) => Buscar(Root, valor);
+            public NoAVL<T>? CloneRaiz() => ClonarNo(Root);
+
+            private NoAVL<T>? ClonarNo(NoAVL<T>? no)
             {
-                Value = value;
-                Height = 1;
+                if (no is null) return null;
+                var copia = new NoAVL<T>(no.Valor) { Altura = no.Altura };
+                copia.Esquerda = ClonarNo(no.Esquerda);
+                copia.Direita = ClonarNo(no.Direita);
+                return copia;
             }
-        }
 
-        // --- Implementação de Árvore AVL ---
-        public class AVLTree<T> where T : IComparable<T>
-        {
-            public AVLNode<T> Root;
-
-            public void Insert(T key) => Root = Insert(Root, key);
-            public void Remove(T key) => Root = Remove(Root, key);
-            public bool Search(T key) => Search(Root, key);
-            public List<T> PreOrder()
+            public List<T> PreOrdem()
             {
-                var list = new List<T>();
-                PreOrder(Root, list);
-                return list;
+                var lista = new List<T>();
+                Pre(Root, lista);
+                return lista;
             }
-            public Dictionary<T, int> BalanceFactors()
+
+            private void Pre(NoAVL<T>? no, List<T> lista)
+            {
+                if (no is null)
+                    return;
+
+                lista.Add(no.Valor);
+                Pre(no.Esquerda, lista);
+                Pre(no.Direita, lista);
+            }
+
+            public Dictionary<T, int> ObterFatoresBalanceamento()
             {
                 var dict = new Dictionary<T, int>();
-                Traverse(Root, dict);
+                Percorrer(Root, dict);
                 return dict;
             }
-            public int Height() => Root?.Height ?? 0;
 
-            private AVLNode<T> Insert(AVLNode<T> node, T key)
+            private void Percorrer(NoAVL<T>? no, Dictionary<T, int> dict)
             {
-                if (node == null) return new AVLNode<T>(key);
-                int cmp = key.CompareTo(node.Value);
+                if (no is null) return;
+                int alturaEsq = no.Esquerda?.Altura ?? 0;
+                int alturaDir = no.Direita?.Altura ?? 0;
+                dict[no.Valor] = alturaEsq - alturaDir;
+                Percorrer(no.Esquerda, dict);
+                Percorrer(no.Direita, dict);
+            }
+
+            public int Altura() => Root?.Altura ?? 0;
+
+            private NoAVL<T>? Inserir(NoAVL<T>? no, T valor)
+            {
+                if (no is null) return new NoAVL<T>(valor);
+                int cmp = valor.CompareTo(no.Valor);
                 if (cmp < 0)
-                    node.Left = Insert(node.Left, key);
+                    no.Esquerda = Inserir(no.Esquerda, valor);
                 else if (cmp > 0)
-                    node.Right = Insert(node.Right, key);
+                    no.Direita = Inserir(no.Direita, valor);
                 else
-                    return node;
+                    return no;
 
-                UpdateHeight(node);
-                return Balance(node);
+                AtualizarAltura(no);
+                return Balancear(no);
             }
 
-            private AVLNode<T> Remove(AVLNode<T> node, T key)
+            private NoAVL<T>? Remover(NoAVL<T>? no, T valor)
             {
-                if (node == null) return null;
-                int cmp = key.CompareTo(node.Value);
+                if (no is null) return null;
+                int cmp = valor.CompareTo(no.Valor);
                 if (cmp < 0)
-                    node.Left = Remove(node.Left, key);
+                    no.Esquerda = Remover(no.Esquerda, valor);
                 else if (cmp > 0)
-                    node.Right = Remove(node.Right, key);
+                    no.Direita = Remover(no.Direita, valor);
                 else
                 {
-                    if (node.Left == null) return node.Right;
-                    if (node.Right == null) return node.Left;
-
-                    var min = MinValueNode(node.Right);
-                    node.Value = min.Value;
-                    node.Right = Remove(node.Right, min.Value);
+                    if (no.Esquerda is null) return no.Direita;
+                    if (no.Direita is null) return no.Esquerda;
+                    var sucessor = EncontrarMin(no.Direita)!;
+                    no.Valor = sucessor.Valor;
+                    no.Direita = Remover(no.Direita, sucessor.Valor);
                 }
 
-                UpdateHeight(node);
-                return Balance(node);
+                AtualizarAltura(no);
+                return Balancear(no);
             }
 
-            private bool Search(AVLNode<T> node, T key)
+            private NoAVL<T>? EncontrarMin(NoAVL<T>? no)
             {
-                if (node == null) return false;
-                int cmp = key.CompareTo(node.Value);
-                if (cmp < 0) return Search(node.Left, key);
-                if (cmp > 0) return Search(node.Right, key);
-                return true;
+                while (no?.Esquerda is not null)
+                    no = no.Esquerda;
+                return no;
             }
 
-            private void PreOrder(AVLNode<T> node, List<T> list)
+            private bool Buscar(NoAVL<T>? no, T valor)
+                => no is null ? false
+                   : valor.CompareTo(no.Valor) < 0 ? Buscar(no.Esquerda, valor)
+                   : valor.CompareTo(no.Valor) > 0 ? Buscar(no.Direita, valor)
+                   : true;
+
+            private void AtualizarAltura(NoAVL<T> no)
+                => no.Altura = 1 + Math.Max(no.Esquerda?.Altura ?? 0, no.Direita?.Altura ?? 0);
+
+            private NoAVL<T> Balancear(NoAVL<T> no)
             {
-                if (node == null) return;
-                list.Add(node.Value);
-                PreOrder(node.Left, list);
-                PreOrder(node.Right, list);
+                int fator = (no.Esquerda?.Altura ?? 0) - (no.Direita?.Altura ?? 0);
+                if (fator > 1 && ((no.Esquerda?.Esquerda?.Altura ?? 0) >= (no.Esquerda?.Direita?.Altura ?? 0)))
+                    return RotacionarDireita(no);
+                if (fator > 1)
+                    return RotacionarDireitaComRotacaoEsquerda(no);
+                if (fator < -1 && ((no.Direita?.Direita?.Altura ?? 0) >= (no.Direita?.Esquerda?.Altura ?? 0)))
+                    return RotacionarEsquerda(no);
+                if (fator < -1)
+                    return RotacionarEsquerdaComRotacaoDireita(no);
+                return no;
             }
 
-            private void Traverse(AVLNode<T> node, Dictionary<T, int> dict)
+            private NoAVL<T> RotacionarDireita(NoAVL<T> y)
             {
-                if (node == null) return;
-                int lh = node.Left?.Height ?? 0;
-                int rh = node.Right?.Height ?? 0;
-                dict[node.Value] = lh - rh;
-                Traverse(node.Left, dict);
-                Traverse(node.Right, dict);
-            }
-
-            private AVLNode<T> MinValueNode(AVLNode<T> node)
-            {
-                while (node.Left != null) node = node.Left;
-                return node;
-            }
-            private AVLNode<T> MaxValueNode(AVLNode<T> node)
-            {
-                while (node.Right != null) node = node.Right;
-                return node;
-            }
-
-            private void UpdateHeight(AVLNode<T> node)
-            {
-                int lh = node.Left?.Height ?? 0;
-                int rh = node.Right?.Height ?? 0;
-                node.Height = 1 + Math.Max(lh, rh);
-            }
-
-            private AVLNode<T> Balance(AVLNode<T> node)
-            {
-                int balance = (node.Left?.Height ?? 0) - (node.Right?.Height ?? 0);
-
-                // LL
-                if (balance > 1 && (node.Left.Left?.Height ?? 0) >= (node.Left.Right?.Height ?? 0))
-                    return RotateRight(node);
-
-                // LR
-                if (balance > 1 && (node.Left.Left?.Height ?? 0) < (node.Left.Right?.Height ?? 0))
-                {
-                    node.Left = RotateLeft(node.Left);
-                    return RotateRight(node);
-                }
-
-                // RR
-                if (balance < -1 && (node.Right.Right?.Height ?? 0) >= (node.Right.Left?.Height ?? 0))
-                    return RotateLeft(node);
-
-                // RL
-                if (balance < -1 && (node.Right.Right?.Height ?? 0) < (node.Right.Left?.Height ?? 0))
-                {
-                    node.Right = RotateRight(node.Right);
-                    return RotateLeft(node);
-                }
-
-                return node;
-            }
-
-            private AVLNode<T> RotateRight(AVLNode<T> y)
-            {
-                var x = y.Left;
-                y.Left = x.Right;
-                x.Right = y;
-                UpdateHeight(y);
-                UpdateHeight(x);
+                var x = y.Esquerda!;
+                y.Esquerda = x.Direita;
+                x.Direita = y;
+                AtualizarAltura(y);
+                AtualizarAltura(x);
                 return x;
             }
 
-            private AVLNode<T> RotateLeft(AVLNode<T> x)
+            private NoAVL<T> RotacionarEsquerda(NoAVL<T> x)
             {
-                var y = x.Right;
-                x.Right = y.Left;
-                y.Left = x;
-                UpdateHeight(x);
-                UpdateHeight(y);
+                var y = x.Direita!;
+                x.Direita = y.Esquerda;
+                y.Esquerda = x;
+                AtualizarAltura(x);
+                AtualizarAltura(y);
                 return y;
+            }
+
+            private NoAVL<T> RotacionarDireitaComRotacaoEsquerda(NoAVL<T> no)
+            {
+                no.Esquerda = RotacionarEsquerda(no.Esquerda!);
+                return RotacionarDireita(no);
+            }
+
+            private NoAVL<T> RotacionarEsquerdaComRotacaoDireita(NoAVL<T> no)
+            {
+                no.Direita = RotacionarDireita(no.Direita!);
+                return RotacionarEsquerda(no);
             }
         }
     }
